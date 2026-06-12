@@ -226,6 +226,106 @@
     outline: none;
   }
   .field input:focus { border-color: var(--sage-dark); background: white; }
+  .field textarea {
+    width: 100%;
+    padding: 11px 14px;
+    border: 1.5px solid var(--border);
+    border-radius: 8px;
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    color: var(--charcoal);
+    background: var(--cream);
+    transition: border-color 0.15s;
+    outline: none;
+    resize: vertical;
+    min-height: 80px;
+    line-height: 1.5;
+  }
+  .field textarea:focus { border-color: var(--sage-dark); background: white; }
+  .field .optional-tag {
+    font-size: 10px;
+    color: var(--mid);
+    font-weight: 400;
+    letter-spacing: 0;
+    text-transform: none;
+    margin-left: 6px;
+  }
+
+  /* Equipment picker */
+  .equip-picker { display: flex; gap: 8px; }
+  .equip-btn {
+    flex: 1;
+    padding: 10px 8px;
+    border: 1.5px solid var(--border);
+    border-radius: 8px;
+    background: var(--cream);
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--mid);
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.15s;
+  }
+  .equip-btn:hover { border-color: var(--sage); color: var(--charcoal); }
+  .equip-btn.selected { background: var(--sage-dark); border-color: var(--sage-dark); color: white; }
+
+  /* Calendar buttons after booking */
+  .cal-buttons { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; }
+  .cal-btn {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    padding: 11px 16px;
+    border-radius: 8px;
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1.5px solid var(--border);
+    background: white;
+    color: var(--charcoal);
+    text-decoration: none;
+    transition: all 0.15s;
+  }
+  .cal-btn:hover { border-color: var(--sage-dark); background: var(--sage-light); }
+
+  /* Hint text above calendar */
+  .booking-hint {
+    text-align: center;
+    font-size: 13px;
+    color: var(--mid);
+    margin-bottom: 24px;
+    line-height: 1.6;
+  }
+  .booking-hint strong { color: var(--charcoal); }
+
+  /* Full day adder */
+  .fullday-adder { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  .fullday-adder input[type="date"],
+  .fullday-adder input[type="time"] {
+    padding: 9px 12px;
+    border: 1.5px solid var(--border);
+    border-radius: 8px;
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    background: var(--cream);
+    color: var(--charcoal);
+    outline: none;
+    flex: 1;
+    min-width: 100px;
+  }
+  .fullday-adder input:focus { border-color: var(--sage-dark); }
+  .btn-add-day {
+    padding: 9px 14px;
+    background: var(--charcoal);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .btn-add-day:hover { background: #444; }
   .btn-book {
     width: 100%;
     padding: 14px;
@@ -443,6 +543,9 @@
   </div>
 
   <!-- CALENDAR -->
+  <div class="booking-hint">
+    <strong>Click any open slot</strong> to choose your start time,<br>then pick how long you'd like — 1h, 1.5h, or 2h.
+  </div>
   <div class="calendar" id="calendar"></div>
 
   <!-- BOOKING PANEL -->
@@ -462,6 +565,18 @@
           <button class="duration-btn" data-mins="120" onclick="selectDuration(this)">2h</button>
         </div>
       </div>
+      <div class="field">
+        <label>Equipment preference <span class="optional-tag">optional</span></label>
+        <div class="equip-picker">
+          <button class="equip-btn selected" data-equip="No preference" onclick="selectEquip(this)">No preference</button>
+          <button class="equip-btn" data-equip="Reformer" onclick="selectEquip(this)">Reformer</button>
+          <button class="equip-btn" data-equip="Mat" onclick="selectEquip(this)">Mat</button>
+        </div>
+      </div>
+      <div class="field">
+        <label>Health notes <span class="optional-tag">optional</span></label>
+        <textarea id="bookerHealth" placeholder="e.g. lower back pain, pregnancy, knee injury, slipped disc…"></textarea>
+      </div>
       <button class="btn-book" onclick="confirmBooking()">Book this slot</button>
       <button class="btn-cancel" onclick="cancelBooking()">Cancel</button>
     </div>
@@ -469,7 +584,12 @@
       <div class="success-icon">✓</div>
       <h3>You're booked!</h3>
       <p id="successText"></p>
-      <button class="btn-cancel" onclick="closeSuccess()" style="margin-top:16px">Book another slot</button>
+      <div class="cal-buttons">
+        <a class="cal-btn" id="calApple" href="#" onclick="downloadICS(event)">🍎 Add to Apple Calendar</a>
+        <a class="cal-btn" id="calGoogle" href="#" target="_blank">📅 Add to Google Calendar</a>
+        <a class="cal-btn" id="calOutlook" href="#" onclick="downloadICS(event)">📆 Add to Outlook</a>
+      </div>
+      <button class="btn-cancel" onclick="closeSuccess()" style="margin-top:16px">Done</button>
     </div>
   </div>
 
@@ -495,13 +615,21 @@
 
     <!-- Controls -->
     <div class="admin-controls" id="adminControls">
-      <div class="admin-section-title">Add a new slot</div>
+      <div class="admin-section-title">Add a single slot</div>
       <div class="slot-adder">
         <input type="date" id="newSlotDate">
         <input type="time" id="newSlotTime" value="09:00" step="1800">
         <button class="btn-add" onclick="addSlot()">+ Add</button>
       </div>
-      <p style="font-size:11px;color:var(--mid);margin-top:8px">Add slots in 30-min increments. Bookers choose 1h, 1.5h or 2h — the system locks consecutive blocks automatically.</p>
+
+      <div class="admin-section-title" style="margin-top:20px">Add a full day of slots</div>
+      <p style="font-size:11px;color:var(--mid);margin-bottom:8px">Creates every 30-min block between your chosen start and end time. Remove individual blocks below to carve out errands etc.</p>
+      <div class="fullday-adder">
+        <input type="date" id="fullDayDate">
+        <input type="time" id="fullDayStart" value="08:00" step="1800">
+        <input type="time" id="fullDayEnd" value="20:00" step="1800">
+        <button class="btn-add-day" onclick="addFullDay()">+ Full day</button>
+      </div>
 
       <div class="admin-section-title" style="margin-top:28px">All slots</div>
       <div class="slots-list" id="adminSlotsList"></div>
@@ -552,6 +680,8 @@ async function loadSlots() {
       bookerName: r.booker_name,
       bookerDuration: r.booker_duration,
       groupId: r.group_id,
+      bookerEquip: r.booker_equip,
+      bookerHealth: r.booker_health,
     }));
   } catch(e) { console.error('loadSlots', e); return []; }
 }
@@ -576,6 +706,8 @@ async function updateSlotInDB(slot) {
       booker_name: slot.bookerName,
       booker_duration: slot.bookerDuration,
       group_id: slot.groupId,
+      booker_equip: slot.bookerEquip,
+      booker_health: slot.bookerHealth,
     }),
   });
 }
@@ -604,6 +736,14 @@ let currentWeekOffset = 0;
 let selectedSlotId = null;
 let adminLoggedIn = false;
 let selectedBookingDuration = 60;
+let selectedEquip = 'No preference';
+let lastBookedSlot = null; // for cal links after booking
+
+function selectEquip(btn) {
+  document.querySelectorAll('.equip-picker .equip-btn').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+  selectedEquip = btn.dataset.equip;
+}
 
 // ─── TIME HELPERS ─────────────────────────────────────────────────────────
 function timeToMins(timeStr) {
@@ -783,13 +923,12 @@ function changeWeek(dir) {
 function selectSlot(id) {
   selectedSlotId = id;
   selectedBookingDuration = 60;
+  selectedEquip = 'No preference';
   const slot = slots.find(s => s.id === id);
 
-  // Work out which durations are available
   const consec = consecutiveAvailable(slot);
   const maxMins = Math.min(consec * 30, 120);
 
-  // Reset duration buttons and grey out unavailable ones
   document.querySelectorAll('.duration-picker .duration-btn').forEach(b => {
     const mins = parseInt(b.dataset.mins);
     const available = mins <= maxMins;
@@ -799,6 +938,12 @@ function selectSlot(id) {
     b.style.cursor = available ? 'pointer' : 'not-allowed';
   });
 
+  // Reset equipment
+  document.querySelectorAll('.equip-picker .equip-btn').forEach(b => {
+    b.classList.toggle('selected', b.dataset.equip === 'No preference');
+  });
+
+  document.getElementById('bookerHealth').value = '';
   document.getElementById('slotInfo').textContent = formatDisplay(slot.date, slot.time);
   document.getElementById('bookerName').value = '';
   document.getElementById('bookingForm').style.display = 'block';
@@ -810,6 +955,7 @@ function selectSlot(id) {
 async function confirmBooking() {
   const name = document.getElementById('bookerName').value.trim();
   if (!name) { document.getElementById('bookerName').focus(); return; }
+  const health = document.getElementById('bookerHealth').value.trim();
 
   slots = await loadSlots();
   const startSlot = slots.find(s => s.id === selectedSlotId);
@@ -825,19 +971,27 @@ async function confirmBooking() {
     cancelBooking(); slots = await loadSlots(); renderCalendar(); return;
   }
 
-  // Use a groupId to tie consecutive blocks together
   const groupId = `g_${Date.now()}`;
   for (const block of blocksToBook) {
     block.status = 'booked';
     block.bookerName = name;
     block.bookerDuration = selectedBookingDuration;
     block.groupId = groupId;
+    block.bookerEquip = selectedEquip;
+    block.bookerHealth = health || null;
     await updateSlotInDB(block);
   }
+
+  // Save for cal links
+  lastBookedSlot = { ...startSlot, bookerName: name, bookerDuration: selectedBookingDuration, bookerEquip: selectedEquip };
 
   const infoText = document.getElementById('slotInfo').textContent;
   const durLabel = durationLabel(selectedBookingDuration);
   document.getElementById('successText').textContent = `${name}, you're confirmed for ${infoText} (${durLabel}). See you on the mat!`;
+
+  // Set calendar links
+  setCalendarLinks(startSlot.date, startSlot.time, selectedBookingDuration, name);
+
   document.getElementById('bookingForm').style.display = 'none';
   document.getElementById('successMsg').classList.add('visible');
 
@@ -852,6 +1006,64 @@ function cancelBooking() {
 }
 
 function closeSuccess() { cancelBooking(); }
+
+// ─── CALENDAR LINK GENERATORS ─────────────────────────────────────────────
+function makeICSBlob(dateStr, timeStr, durationMins, name) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const [h, min] = timeStr.split(':').map(Number);
+  const pad = n => String(n).padStart(2,'0');
+  const dtStart = `${y}${pad(m)}${pad(d)}T${pad(h)}${pad(min)}00`;
+  const totalMins = h * 60 + min + durationMins;
+  const dtEnd = `${y}${pad(m)}${pad(d)}T${pad(Math.floor(totalMins/60))}${pad(totalMins%60)}00`;
+  const now = new Date();
+  const stamp = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}T${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  const ics = [
+    'BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Pilates Booking//EN',
+    'CALSCALE:GREGORIAN','METHOD:PUBLISH','BEGIN:VEVENT',
+    `UID:pilates-${dateStr}-${timeStr}@booking`,
+    `DTSTAMP:${stamp}`,`DTSTART:${dtStart}`,`DTEND:${dtEnd}`,
+    `SUMMARY:Reformer session${name ? ' — ' + name : ''}`,
+    'END:VEVENT','END:VCALENDAR'
+  ].join('\r\n');
+  return new Blob([ics], { type: 'text/calendar;charset=utf-8' });
+}
+
+function downloadICS(e) {
+  e.preventDefault();
+  if (!lastBookedSlot) return;
+  const blob = makeICSBlob(lastBookedSlot.date, lastBookedSlot.time, lastBookedSlot.bookerDuration, lastBookedSlot.bookerName);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `reformer-session.ics`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function setCalendarLinks(dateStr, timeStr, durationMins, name) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const [h, min] = timeStr.split(':').map(Number);
+  const pad = n => String(n).padStart(2,'0');
+
+  // Google Calendar link
+  const dtStart = `${y}${pad(m)}${pad(d)}T${pad(h)}${pad(min)}00`;
+  const totalMins = h * 60 + min + durationMins;
+  const dtEnd = `${y}${pad(m)}${pad(d)}T${pad(Math.floor(totalMins/60))}${pad(totalMins%60)}00`;
+  const title = encodeURIComponent(`Reformer session — ${name}`);
+  const googleUrl = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${dtStart}/${dtEnd}`;
+  document.getElementById('calGoogle').href = googleUrl;
+}
+
+// Admin ICS download (for your own calendar)
+function generateICS(slot) {
+  const blob = makeICSBlob(slot.date, slot.time, slot.bookerDuration || 60, slot.bookerName);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `reformer-${slot.date}-${slot.time.replace(':','-')}.ics`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
 // ─── ADMIN ────────────────────────────────────────────────────────────────
 function toggleAdmin(e) {
@@ -903,6 +1115,37 @@ async function addSlot() {
   renderAdminSlots();
 }
 
+async function addFullDay() {
+  const date = document.getElementById('fullDayDate').value;
+  const startTime = document.getElementById('fullDayStart').value;
+  const endTime = document.getElementById('fullDayEnd').value;
+  if (!date || !startTime || !endTime) { alert('Please fill in date, start and end time.'); return; }
+
+  let startMins = timeToMins(startTime);
+  const endMins = timeToMins(endTime);
+  if (startMins >= endMins) { alert('End time must be after start time.'); return; }
+
+  slots = await loadSlots();
+  const existing = slots.filter(s => s.date === date).map(s => s.time);
+
+  let added = 0;
+  while (startMins < endMins) {
+    const time = minsToTime(startMins);
+    if (!existing.includes(time)) {
+      const newSlot = { id: `${Date.now()}_${startMins}`, date, time, durationMins: 30, status: 'available', bookerName: null, bookerDuration: null, groupId: null };
+      await addSlotToDB(newSlot);
+      added++;
+      await new Promise(r => setTimeout(r, 50));
+    }
+    startMins += 30;
+  }
+
+  slots = await loadSlots();
+  renderCalendar();
+  renderAdminSlots();
+  alert(`Done! Added ${added} slot${added !== 1 ? 's' : ''} for ${date}. Remove any you don't want below.`);
+}
+
 async function toggleBlock(id) {
   slots = await loadSlots();
   const s = slots.find(x => x.id === id);
@@ -922,38 +1165,6 @@ async function deleteSlot(id) {
   renderAdminSlots();
 }
 
-function generateICS(slot) {
-  const [y, m, d] = slot.date.split('-').map(Number);
-  const [h, min] = slot.time.split(':').map(Number);
-  const pad = n => String(n).padStart(2,'0');
-  const dtStart = `${y}${pad(m)}${pad(d)}T${pad(h)}${pad(min)}00`;
-  const durationMins = slot.bookerDuration || 60;
-  const totalMins = h * 60 + min + durationMins;
-  const endH = Math.floor(totalMins / 60);
-  const endMin = totalMins % 60;
-  const dtEnd = `${y}${pad(m)}${pad(d)}T${pad(endH)}${pad(endMin)}00`;
-  const now = new Date();
-  const stamp = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}T${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-  const summary = slot.bookerName ? `Reformer — ${slot.bookerName}` : 'Reformer Session';
-  const description = slot.bookerName ? `Session booked by ${slot.bookerName} (${durationLabel(durationMins)}).` : 'Reformer Pilates session.';
-
-  const ics = [
-    'BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Pilates Booking//EN',
-    'CALSCALE:GREGORIAN','METHOD:PUBLISH','BEGIN:VEVENT',
-    `UID:pilates-${slot.id}@booking`,`DTSTAMP:${stamp}`,
-    `DTSTART:${dtStart}`,`DTEND:${dtEnd}`,
-    `SUMMARY:${summary}`,`DESCRIPTION:${description}`,
-    'END:VEVENT','END:VCALENDAR'
-  ].join('\r\n');
-
-  const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `reformer-${slot.date}-${slot.time.replace(':','-')}.ics`;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
 
 function renderAdminSlots() {
   const list = document.getElementById('adminSlotsList');
@@ -965,14 +1176,11 @@ function renderAdminSlots() {
   const sorted = [...slots].sort((a,b) => (a.date+a.time).localeCompare(b.date+b.time));
   list.innerHTML = '';
 
-  // Group booked consecutive blocks so admin sees them as one entry
-  const shownGroupIds = new Set();
-
   sorted.forEach(s => {
     // Skip continuation blocks of a booked group
     if (s.status === 'booked' && s.groupId) {
       const group = sorted.filter(x => x.groupId === s.groupId).sort((a,b) => a.time.localeCompare(b.time));
-      if (group[0].id !== s.id) return; // only show the first block
+      if (group[0].id !== s.id) return;
     }
 
     const row = document.createElement('div');
@@ -981,19 +1189,22 @@ function renderAdminSlots() {
 
     const label = formatDisplay(s.date, s.time);
     let statusText = '';
+    let extraInfo = '';
     if (s.status === 'booked') {
-      statusText = `Booked — ${s.bookerName} (${durationLabel(s.bookerDuration || 60)})`;
+      statusText = `${s.bookerName} · ${durationLabel(s.bookerDuration || 60)}`;
+      if (s.bookerEquip && s.bookerEquip !== 'No preference') extraInfo += ` · ${s.bookerEquip}`;
+      if (s.bookerHealth) extraInfo += ` · ⚠️ ${s.bookerHealth}`;
     } else {
-      statusText = s.status === 'blocked' ? 'Blocked' : 'Available (30-min block)';
+      statusText = s.status === 'blocked' ? 'Blocked' : 'Available';
     }
 
     row.innerHTML = `
       <div class="slot-row-info">
         <div>${label}</div>
-        <div class="slot-row-name">${statusText}</div>
+        <div class="slot-row-name">${statusText}${extraInfo}</div>
       </div>
       <div class="slot-row-actions">
-        ${s.status === 'booked' ? `<button class="btn-sm btn-cal" onclick="generateICS(slots.find(x=>x.id==='${s.id}'))" title="Add to calendar">📅</button>` : ''}
+        ${s.status === 'booked' ? `<button class="btn-sm btn-cal" onclick="generateICS(slots.find(x=>x.id==='${s.id}'))" title="Add to my calendar">📅</button>` : ''}
         ${s.status !== 'booked' ? `<button class="btn-sm ${s.status === 'available' ? 'btn-block' : 'btn-unblock'}" onclick="toggleBlock('${s.id}')">${s.status === 'available' ? 'Block' : 'Unblock'}</button>` : ''}
         <button class="btn-sm btn-delete" onclick="deleteSlot('${s.id}')">Remove</button>
       </div>
