@@ -909,7 +909,15 @@ function renderCalendar() {
       }
     });
 
-    const visibleSlots = daySlots.filter(s => !continuationIds.has(s.id));
+    const visibleSlots = daySlots.filter(s => {
+      if (continuationIds.has(s.id)) return false;
+      // For available slots, only show if there are at least 2 consecutive blocks (min 1h)
+      if (s.status === 'available') {
+        const consec = consecutiveAvailable(s);
+        return consec >= 2;
+      }
+      return true;
+    });
 
     if (visibleSlots.length === 0) {
       const empty = document.createElement('div');
