@@ -517,11 +517,38 @@
 
   /* Responsive */
   @media (max-width: 600px) {
-    .calendar { grid-template-columns: repeat(7, 1fr); gap: 4px; }
-    .slot { padding: 5px 2px; font-size: 10px; }
+    header { padding: 32px 20px 24px; }
+    header h1 { font-size: 36px; }
+
+    .container { padding: 24px 16px 60px; }
+
+    /* Calendar: show 7 days but very compact */
+    .calendar { grid-template-columns: repeat(7, 1fr); gap: 3px; margin-bottom: 32px; }
+    .slot { padding: 5px 2px; font-size: 10px; border-radius: 6px; }
     .slot-time { font-size: 9px; }
     .slot-status { display: none; }
-    .day-header .day-num { font-size: 16px; }
+    .day-header { font-size: 9px; padding: 4px 2px; }
+    .day-header .day-num { font-size: 15px; }
+
+    /* Week nav */
+    .week-nav .week-label { font-size: 17px; min-width: 160px; }
+
+    /* Booking panel */
+    .booking-panel { padding: 24px 20px; }
+    .booking-panel h2 { font-size: 24px; }
+    .equip-picker { flex-wrap: wrap; }
+    .equip-btn { min-width: calc(50% - 4px); flex: none; }
+
+    /* Admin panel */
+    .admin-panel { padding: 24px 20px; }
+    .slot-adder { flex-direction: column; }
+    .fullday-adder { flex-direction: column; }
+    .slot-row { flex-direction: column; align-items: flex-start; gap: 10px; }
+    .slot-row-actions { width: 100%; justify-content: flex-end; }
+
+    /* Cal buttons */
+    .cal-buttons { gap: 6px; }
+    .cal-btn { font-size: 12px; padding: 10px 12px; }
   }
 </style>
 </head>
@@ -1320,359 +1347,6 @@ async function savePassword(p) {
   });
 }
 
-// ─── STATE ───────────────────────────────────────────────────────────────
-let slots = [];       // [{id, date, time, durationMins, status:'available'|'blocked'|'booked', bookerName, bookerDuration}]
-let currentWeekOffset = 0;
-let selectedSlotId = null;
-let adminLoggedIn = false;
-let selectedBookingDuration = 60;
-let selectedAdminDuration = 60;
-
-function selectDuration(btn) {
-  document.querySelectorAll('.duration-picker .duration-btn').forEach(b => b.classList.remove('selected'));
-  btn.classList.add('selected');
-  selectedBookingDuration = parseInt(btn.dataset.mins);
-}
-
-function selectAdminDuration(btn) {
-  btn.closest('div').querySelectorAll('.duration-btn').forEach(b => b.classList.remove('selected'));
-  btn.classList.add('selected');
-  selectedAdminDuration = parseInt(btn.dataset.mins);
-}
-
-function durationLabel(mins) {
-  if (mins === 60) return '1h';
-  if (mins === 90) return '1.5h';
-  if (mins === 120) return '2h';
-  return `${mins}m`;
-}
-
-// ─── DATE HELPERS ────────────────────────────────────────────────────────
-function getWeekStart(offset = 0) {
-  const now = new Date();
-  const day = now.getDay(); // 0=Sun
-  const start = new Date(now);
-  start.setDate(now.getDate() - day + offset * 7);
-  start.setHours(0,0,0,0);
-  return start;
-}
-
-function formatDate(d) {
-  return d.toISOString().split('T')[0];
-}
-
-function formatDisplay(dateStr, timeStr) {
-  const [y,m,dy] = dateStr.split('-').map(Number);
-  const d = new Date(y, m-1, dy);
-  const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  const [h, min] = timeStr.split(':').map(Number);
-  const ampm = h >= 12 ? 'pm' : 'am';
-  const hr = h % 12 || 12;
-  return `${days[d.getDay()]}, ${months[m-1]} ${dy} at ${hr}:${min.toString().padStart(2,'0')}${ampm}`;
-}
-
-function isToday(dateStr) {
-  return dateStr === formatDate(new Date());
-}
-
-function isPast(dateStr, timeStr) {
-  const now = new Date();
-  const [y,m,dy] = dateStr.split('-').map(Number);
-  const [h, min] = timeStr.split(':').map(Number);
-  const slotTime = new Date(y, m-1, dy, h, min);
-  return slotTime < now;
-}
-
-// ─── RENDER CALENDAR ─────────────────────────────────────────────────────
-function renderCalendar() {
-  const weekStart = getWeekStart(currentWeekOffset);
-  const cal = document.getElementById('calendar');
-  const weekLabel = document.getElementById('weekLabel');
-
-  // Week label
-  const weekEnd = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 6);
-  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  weekLabel.textContent = `${months[weekStart.getMonth()]} ${weekStart.getDate()} – ${months[weekEnd.getMonth()]} ${weekEnd.getDate()}`;
-
-  const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-  cal.innerHTML = '';
-
-  for (let i = 0; i < 7; i++) {
-    const day = new Date(weekStart);
-    day.setDate(weekStart.getDate() + i);
-    const dateStr = formatDate(day);
-
-    const col = document.createElement('div');
-    col.className = 'day-col';
-
-    const header = document.createElement('div');
-    header.className = 'day-header' + (isToday(dateStr) ? ' today' : '');
-    header.innerHTML = `${dayNames[i]}<span class="day-num">${day.getDate()}</span>`;
-    col.appendChild(header);
-
-    // Slots for this day
-    const daySlots = slots.filter(s => s.date === dateStr)
-      .sort((a,b) => a.time.localeCompare(b.time));
-
-    if (daySlots.length === 0) {
-      const empty = document.createElement('div');
-      empty.style.cssText = 'height:40px;';
-      col.appendChild(empty);
-    }
-
-    daySlots.forEach(slot => {
-      const el = document.createElement('div');
-      const past = isPast(slot.date, slot.time);
-      let cls = past ? 'past' : slot.status;
-      el.className = `slot ${cls}`;
-
-      const [h, min] = slot.time.split(':').map(Number);
-      const ampm = h >= 12 ? 'pm' : 'am';
-      const hr = h % 12 || 12;
-      const timeLabel = `${hr}:${min.toString().padStart(2,'0')}${ampm}`;
-
-      let statusLabel = '';
-      if (past) statusLabel = 'past';
-      else if (slot.status === 'blocked') statusLabel = 'blocked';
-      else if (slot.status === 'booked') statusLabel = slot.bookerName || 'booked';
-      else statusLabel = durationLabel(slot.durationMins || 60);
-
-      el.innerHTML = `<div class="slot-time">${timeLabel}</div><div class="slot-status">${statusLabel}</div>`;
-
-      if (!past && slot.status === 'available') {
-        el.onclick = () => selectSlot(slot.id);
-      }
-      col.appendChild(el);
-    });
-
-    cal.appendChild(col);
-  }
-}
-
-function changeWeek(dir) {
-  currentWeekOffset += dir;
-  renderCalendar();
-}
-
-// ─── BOOKING ─────────────────────────────────────────────────────────────
-function selectSlot(id) {
-  selectedSlotId = id;
-  selectedBookingDuration = 60;
-  // Reset duration buttons
-  document.querySelectorAll('.duration-picker .duration-btn').forEach(b => {
-    b.classList.toggle('selected', parseInt(b.dataset.mins) === 60);
-  });
-  const slot = slots.find(s => s.id === id);
-  document.getElementById('slotInfo').textContent = formatDisplay(slot.date, slot.time);
-  document.getElementById('bookerName').value = '';
-  document.getElementById('bookingForm').style.display = 'block';
-  document.getElementById('successMsg').classList.remove('visible');
-  document.getElementById('bookingPanel').classList.add('visible');
-  document.getElementById('bookingPanel').scrollIntoView({ behavior: 'smooth', block: 'center' });
-}
-
-async function confirmBooking() {
-  const name = document.getElementById('bookerName').value.trim();
-  if (!name) { document.getElementById('bookerName').focus(); return; }
-
-  // Re-load to check it's still available
-  slots = await loadSlots();
-  const slot = slots.find(s => s.id === selectedSlotId);
-  if (!slot || slot.status !== 'available') {
-    alert('Sorry, this slot was just taken! Please pick another.');
-    cancelBooking();
-    renderCalendar();
-    return;
-  }
-
-  slot.status = 'booked';
-  slot.bookerName = name;
-  slot.bookerDuration = selectedBookingDuration;
-  await updateSlotInDB(slot);
-
-  const infoText = document.getElementById('slotInfo').textContent;
-  const durLabel = durationLabel(selectedBookingDuration);
-  document.getElementById('successText').textContent = `${name}, you're confirmed for ${infoText} (${durLabel}). See you on the mat!`;
-  document.getElementById('bookingForm').style.display = 'none';
-  document.getElementById('successMsg').classList.add('visible');
-
-  renderCalendar();
-  if (adminLoggedIn) renderAdminSlots();
-}
-
-function cancelBooking() {
-  document.getElementById('bookingPanel').classList.remove('visible');
-  selectedSlotId = null;
-}
-
-function closeSuccess() {
-  cancelBooking();
-}
-
-// ─── ADMIN ───────────────────────────────────────────────────────────────
-function toggleAdmin(e) {
-  e.preventDefault();
-  const panel = document.getElementById('adminPanel');
-  panel.classList.toggle('visible');
-}
-
-async function adminSignIn() {
-  const entered = document.getElementById('adminPass').value;
-  const correct = await loadPassword();
-  if (entered === correct) {
-    adminLoggedIn = true;
-    document.getElementById('adminLogin').classList.add('hidden');
-    document.getElementById('adminControls').classList.add('visible');
-    document.getElementById('adminError').style.display = 'none';
-    // Set today as default date
-    document.getElementById('newSlotDate').value = formatDate(new Date());
-    renderAdminSlots();
-  } else {
-    document.getElementById('adminError').style.display = 'block';
-  }
-}
-
-function adminSignOut() {
-  adminLoggedIn = false;
-  document.getElementById('adminLogin').classList.remove('hidden');
-  document.getElementById('adminControls').classList.remove('visible');
-  document.getElementById('adminPass').value = '';
-  document.getElementById('adminPanel').classList.remove('visible');
-}
-
-async function addSlot() {
-  const date = document.getElementById('newSlotDate').value;
-  const time = document.getElementById('newSlotTime').value;
-  if (!date || !time) { alert('Pick a date and time.'); return; }
-
-  slots = await loadSlots();
-  if (slots.find(s => s.date === date && s.time === time)) {
-    alert('A slot already exists at that time.'); return;
-  }
-
-  const newSlot = { id: Date.now().toString(), date, time, durationMins: selectedAdminDuration, status: 'available', bookerName: null, bookerDuration: null };
-  await addSlotToDB(newSlot);
-  slots = await loadSlots();
-  renderCalendar();
-  renderAdminSlots();
-}
-
-async function toggleBlock(id) {
-  slots = await loadSlots();
-  const s = slots.find(x => x.id === id);
-  if (!s || s.status === 'booked') return;
-  s.status = s.status === 'available' ? 'blocked' : 'available';
-  await updateSlotInDB(s);
-  slots = await loadSlots();
-  renderCalendar();
-  renderAdminSlots();
-}
-
-async function deleteSlot(id) {
-  if (!confirm('Remove this slot entirely?')) return;
-  await deleteSlotFromDB(id);
-  slots = await loadSlots();
-  renderCalendar();
-  renderAdminSlots();
-}
-
-function generateICS(slot) {
-  const [y, m, d] = slot.date.split('-').map(Number);
-  const [h, min] = slot.time.split(':').map(Number);
-
-  // Format as UTC string: YYYYMMDDTHHMMSSZ
-  // We keep it as local "floating" time (no Z) so iPhone uses device timezone
-  const pad = n => String(n).padStart(2, '0');
-  const dtStart = `${y}${pad(m)}${pad(d)}T${pad(h)}${pad(min)}00`;
-  // End = start + booked duration (or slot's default duration)
-  const durationMins = slot.bookerDuration || slot.durationMins || 60;
-  const totalMins = h * 60 + min + durationMins;
-  const endH = Math.floor(totalMins / 60);
-  const endMin = totalMins % 60;
-  const dtEnd = `${y}${pad(m)}${pad(d)}T${pad(endH)}${pad(endMin)}00`;
-
-  const uid = `pilates-${slot.id}@booking`;
-  const summary = slot.bookerName ? `Pilates — ${slot.bookerName}` : 'Pilates Session';
-  const description = slot.bookerName ? `Session booked by ${slot.bookerName}.` : 'Pilates practice session.';
-  const now = new Date();
-  const stamp = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}T${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-
-  const ics = [
-    'BEGIN:VCALENDAR',
-    'VERSION:2.0',
-    'PRODID:-//Pilates Booking//EN',
-    'CALSCALE:GREGORIAN',
-    'METHOD:PUBLISH',
-    'BEGIN:VEVENT',
-    `UID:${uid}`,
-    `DTSTAMP:${stamp}`,
-    `DTSTART:${dtStart}`,
-    `DTEND:${dtEnd}`,
-    `SUMMARY:${summary}`,
-    `DESCRIPTION:${description}`,
-    'END:VEVENT',
-    'END:VCALENDAR'
-  ].join('\r\n');
-
-  const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `pilates-${slot.date}-${slot.time.replace(':','-')}.ics`;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-function renderAdminSlots() {
-  const list = document.getElementById('adminSlotsList');
-  if (slots.length === 0) {
-    list.innerHTML = '<div class="empty-state">No slots yet. Add one above.</div>';
-    return;
-  }
-
-  const sorted = [...slots].sort((a,b) => (a.date+a.time).localeCompare(b.date+b.time));
-  list.innerHTML = '';
-
-  sorted.forEach(s => {
-    const row = document.createElement('div');
-    const clsMap = { available: 'avail', blocked: 'blkd', booked: 'bkd' };
-    row.className = `slot-row ${clsMap[s.status] || ''}`;
-
-    const label = formatDisplay(s.date, s.time);
-    const slotDur = durationLabel(s.durationMins || 60);
-    const bookedDur = s.bookerDuration ? durationLabel(s.bookerDuration) : null;
-    const statusText = s.status === 'booked'
-      ? `Booked — ${s.bookerName} (${bookedDur || slotDur})`
-      : `${s.status.charAt(0).toUpperCase() + s.status.slice(1)} · up to ${slotDur}`;
-
-    row.innerHTML = `
-      <div class="slot-row-info">
-        <div>${label}</div>
-        <div class="slot-row-name">${statusText}</div>
-      </div>
-      <div class="slot-row-actions">
-        <button class="btn-sm btn-cal" onclick="generateICS(slots.find(x=>x.id==='${s.id}'))" title="Add to iPhone calendar">📅</button>
-        ${s.status !== 'booked' ? `<button class="btn-sm ${s.status === 'available' ? 'btn-block' : 'btn-unblock'}" onclick="toggleBlock('${s.id}')">${s.status === 'available' ? 'Block' : 'Unblock'}</button>` : ''}
-        <button class="btn-sm btn-delete" onclick="deleteSlot('${s.id}')">Remove</button>
-      </div>
-    `;
-    list.appendChild(row);
-  });
-}
-
-async function changePassword() {
-  const np = document.getElementById('newPass').value.trim();
-  if (!np) return;
-  await savePassword(np);
-  const msg = document.getElementById('passMsg');
-  msg.textContent = 'Password updated.';
-  msg.style.color = 'var(--sage-dark)';
-  msg.style.display = 'block';
-  document.getElementById('newPass').value = '';
-  setTimeout(() => { msg.style.display = 'none'; }, 2500);
-}
-
 // ─── INIT ─────────────────────────────────────────────────────────────────
 async function init() {
   slots = await loadSlots();
@@ -1681,12 +1355,8 @@ async function init() {
 
 init();
 
-// Poll for updates every 20s so multiple bookers stay in sync
 setInterval(async () => {
-  if (!adminLoggedIn) {
-    slots = await loadSlots();
-    renderCalendar();
-  }
+  if (!adminLoggedIn) { slots = await loadSlots(); renderCalendar(); }
 }, 20000);
 </script>
 </body>
