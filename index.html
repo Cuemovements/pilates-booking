@@ -498,14 +498,10 @@
       <div class="admin-section-title">Add a new slot</div>
       <div class="slot-adder">
         <input type="date" id="newSlotDate">
-        <input type="time" id="newSlotTime" value="09:00">
+        <input type="time" id="newSlotTime" value="09:00" step="1800">
         <button class="btn-add" onclick="addSlot()">+ Add</button>
       </div>
-      <div style="display:flex;gap:8px;margin-top:8px">
-        <button class="duration-btn selected" data-mins="60" onclick="selectAdminDuration(this)">1h</button>
-        <button class="duration-btn" data-mins="90" onclick="selectAdminDuration(this)">1.5h</button>
-        <button class="duration-btn" data-mins="120" onclick="selectAdminDuration(this)">2h</button>
-      </div>
+      <p style="font-size:11px;color:var(--mid);margin-top:8px">Add slots in 30-min increments. Bookers choose 1h, 1.5h or 2h — the system locks consecutive blocks automatically.</p>
 
       <div class="admin-section-title" style="margin-top:28px">All slots</div>
       <div class="slots-list" id="adminSlotsList"></div>
@@ -528,6 +524,508 @@
 <script>
 // ─── SUPABASE CONFIG ─────────────────────────────────────────────────────
 const SUPABASE_URL = 'https://lqvvejtekcgbzvyqufel.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxxdnZlanRla2NnYnp2eXF1ZmVsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEyMDk5MDcsImV4cCI6MjA5Njc4NTkwN30.CjHXUluYDXqJ8nqNWKirAq5JpOKOPRh4vV5z1ywsCsY';
+
+async function sb(path, options = {}) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    headers: {
+      'apikey': SUPABASE_KEY,
+      'Authorization': `Bearer ${SUPABASE_KEY}`,
+      'Content-Type': 'application/json',
+      'Prefer': options.prefer || '',
+    },
+    ...options,
+  });
+  if (!res.ok) { const err = await res.text(); throw new Error(err); }
+  const text = await res.text();
+  return text ? JSON.parse(text) : null;
+}
+
+// ─── DB HELPERS ───────────────────────────────────────────────────────────
+async function loadSlots() {
+  try {
+    const data = await sb('slots?order=date,time');
+    return (data || []).map(r => ({
+      id: r.id, date: r.date, time: r.time,
+      durationMins: r.duration_mins,
+      status: r.status,
+      bookerName: r.booker_name,
+      bookerDuration: r.booker_duration,
+      groupId: r.group_id,
+    }));
+  } catch(e) { console.error('loadSlots', e); return []; }
+}
+
+async function addSlotToDB(slot) {
+  await sb('slots', {
+    method: 'POST', prefer: 'return=minimal',
+    body: JSON.stringify({
+      id: slot.id, date: slot.date, time: slot.time,
+      duration_mins: 30,
+      status: slot.status,
+      booker_name: null, booker_duration: null, group_id: null,
+    }),
+  });
+}
+
+async function updateSlotInDB(slot) {
+  await sb(`slots?id=eq.${slot.id}`, {
+    method: 'PATCH', prefer: 'return=minimal',
+    body: JSON.stringify({
+      status: slot.status,
+      booker_name: slot.bookerName,
+      booker_duration: slot.bookerDuration,
+      group_id: slot.groupId,
+    }),
+  });
+}
+
+async function deleteSlotFromDB(id) {
+  await sb(`slots?id=eq.${id}`, { method: 'DELETE' });
+}
+
+async function loadPassword() {
+  try {
+    const data = await sb('settings?key=eq.password&select=value');
+    return data && data[0] ? data[0].value : 'pilates';
+  } catch { return 'pilates'; }
+}
+
+async function savePassword(p) {
+  await sb('settings?key=eq.password', {
+    method: 'PATCH', prefer: 'return=minimal',
+    body: JSON.stringify({ value: p }),
+  });
+}
+
+// ─── STATE ────────────────────────────────────────────────────────────────
+let slots = [];
+let currentWeekOffset = 0;
+let selectedSlotId = null;
+let adminLoggedIn = false;
+let selectedBookingDuration = 60;
+
+// ─── TIME HELPERS ─────────────────────────────────────────────────────────
+function timeToMins(timeStr) {
+  const [h, m] = timeStr.split(':').map(Number);
+  return h * 60 + m;
+}
+
+function minsToTime(mins) {
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+}
+
+function durationLabel(mins) {
+  if (mins === 60) return '1h';
+  if (mins === 90) return '1.5h';
+  if (mins === 120) return '2h';
+  return `${mins}m`;
+}
+
+// Given a start slot, find how many consecutive available 30-min blocks exist on same date
+function consecutiveAvailable(startSlot) {
+  let count = 1;
+  let nextMins = timeToMins(startSlot.time) + 30;
+  while (true) {
+    const nextTime = minsToTime(nextMins);
+    const next = slots.find(s => s.date === startSlot.date && s.time === nextTime && s.status === 'available');
+    if (!next) break;
+    count++;
+    nextMins += 30;
+  }
+  return count; // each block = 30 mins, so 2=1h, 3=1.5h, 4=2h
+}
+
+// Get the N consecutive slots starting from a given slot
+function getConsecutiveSlots(startSlot, blocksNeeded) {
+  const result = [startSlot];
+  let nextMins = timeToMins(startSlot.time) + 30;
+  for (let i = 1; i < blocksNeeded; i++) {
+    const nextTime = minsToTime(nextMins);
+    const next = slots.find(s => s.date === startSlot.date && s.time === nextTime);
+    if (!next) return null;
+    result.push(next);
+    nextMins += 30;
+  }
+  return result;
+}
+
+function selectDuration(btn) {
+  document.querySelectorAll('.duration-picker .duration-btn').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+  selectedBookingDuration = parseInt(btn.dataset.mins);
+}
+
+// ─── DATE HELPERS ─────────────────────────────────────────────────────────
+function getWeekStart(offset = 0) {
+  const now = new Date();
+  const day = now.getDay();
+  const start = new Date(now);
+  start.setDate(now.getDate() - day + offset * 7);
+  start.setHours(0,0,0,0);
+  return start;
+}
+
+function formatDate(d) {
+  return d.toISOString().split('T')[0];
+}
+
+function formatDisplay(dateStr, timeStr) {
+  const [y,m,dy] = dateStr.split('-').map(Number);
+  const d = new Date(y, m-1, dy);
+  const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const [h, min] = timeStr.split(':').map(Number);
+  const ampm = h >= 12 ? 'pm' : 'am';
+  const hr = h % 12 || 12;
+  return `${days[d.getDay()]}, ${months[m-1]} ${dy} at ${hr}:${String(min).padStart(2,'0')}${ampm}`;
+}
+
+function isToday(dateStr) { return dateStr === formatDate(new Date()); }
+
+function isPast(dateStr, timeStr) {
+  const [y,m,dy] = dateStr.split('-').map(Number);
+  const [h, min] = timeStr.split(':').map(Number);
+  return new Date(y, m-1, dy, h, min) < new Date();
+}
+
+function friendlyTime(timeStr) {
+  const [h, min] = timeStr.split(':').map(Number);
+  const ampm = h >= 12 ? 'pm' : 'am';
+  const hr = h % 12 || 12;
+  return `${hr}:${String(min).padStart(2,'0')}${ampm}`;
+}
+
+// ─── CALENDAR ─────────────────────────────────────────────────────────────
+function renderCalendar() {
+  const weekStart = getWeekStart(currentWeekOffset);
+  const cal = document.getElementById('calendar');
+  const weekLabel = document.getElementById('weekLabel');
+  const weekEnd = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 6);
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  weekLabel.textContent = `${months[weekStart.getMonth()]} ${weekStart.getDate()} – ${months[weekEnd.getMonth()]} ${weekEnd.getDate()}`;
+
+  const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  cal.innerHTML = '';
+
+  for (let i = 0; i < 7; i++) {
+    const day = new Date(weekStart);
+    day.setDate(weekStart.getDate() + i);
+    const dateStr = formatDate(day);
+
+    const col = document.createElement('div');
+    col.className = 'day-col';
+
+    const header = document.createElement('div');
+    header.className = 'day-header' + (isToday(dateStr) ? ' today' : '');
+    header.innerHTML = `${dayNames[i]}<span class="day-num">${day.getDate()}</span>`;
+    col.appendChild(header);
+
+    // Only show the FIRST block of each group to users (hide continuation blocks)
+    const daySlots = slots.filter(s => s.date === dateStr).sort((a,b) => a.time.localeCompare(b.time));
+
+    // Track which slots are "continuation" blocks (booked as part of a longer session)
+    const continuationIds = new Set();
+    daySlots.forEach(s => {
+      if (s.status === 'booked' && s.groupId) {
+        // Find all slots with same groupId that come after this one
+        const group = daySlots.filter(x => x.groupId === s.groupId).sort((a,b) => a.time.localeCompare(b.time));
+        group.slice(1).forEach(x => continuationIds.add(x.id));
+      }
+    });
+
+    const visibleSlots = daySlots.filter(s => !continuationIds.has(s.id));
+
+    if (visibleSlots.length === 0) {
+      const empty = document.createElement('div');
+      empty.style.cssText = 'height:40px;';
+      col.appendChild(empty);
+    }
+
+    visibleSlots.forEach(slot => {
+      const el = document.createElement('div');
+      const past = isPast(slot.date, slot.time);
+      let cls = past ? 'past' : slot.status;
+      el.className = `slot ${cls}`;
+
+      const timeLabel = friendlyTime(slot.time);
+      let statusLabel = '';
+      if (past) statusLabel = 'past';
+      else if (slot.status === 'blocked') statusLabel = 'blocked';
+      else if (slot.status === 'booked') statusLabel = durationLabel(slot.bookerDuration || 60);
+      else {
+        // Show max available duration for this start
+        const consec = consecutiveAvailable(slot);
+        const maxMins = Math.min(consec * 30, 120);
+        statusLabel = maxMins >= 120 ? 'up to 2h' : maxMins >= 90 ? 'up to 1.5h' : '1h';
+      }
+
+      el.innerHTML = `<div class="slot-time">${timeLabel}</div><div class="slot-status">${statusLabel}</div>`;
+
+      if (!past && slot.status === 'available') {
+        el.onclick = () => selectSlot(slot.id);
+      }
+      col.appendChild(el);
+    });
+
+    cal.appendChild(col);
+  }
+}
+
+function changeWeek(dir) {
+  currentWeekOffset += dir;
+  renderCalendar();
+}
+
+// ─── BOOKING ──────────────────────────────────────────────────────────────
+function selectSlot(id) {
+  selectedSlotId = id;
+  selectedBookingDuration = 60;
+  const slot = slots.find(s => s.id === id);
+
+  // Work out which durations are available
+  const consec = consecutiveAvailable(slot);
+  const maxMins = Math.min(consec * 30, 120);
+
+  // Reset duration buttons and grey out unavailable ones
+  document.querySelectorAll('.duration-picker .duration-btn').forEach(b => {
+    const mins = parseInt(b.dataset.mins);
+    const available = mins <= maxMins;
+    b.classList.toggle('selected', mins === 60);
+    b.disabled = !available;
+    b.style.opacity = available ? '1' : '0.35';
+    b.style.cursor = available ? 'pointer' : 'not-allowed';
+  });
+
+  document.getElementById('slotInfo').textContent = formatDisplay(slot.date, slot.time);
+  document.getElementById('bookerName').value = '';
+  document.getElementById('bookingForm').style.display = 'block';
+  document.getElementById('successMsg').classList.remove('visible');
+  document.getElementById('bookingPanel').classList.add('visible');
+  document.getElementById('bookingPanel').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+async function confirmBooking() {
+  const name = document.getElementById('bookerName').value.trim();
+  if (!name) { document.getElementById('bookerName').focus(); return; }
+
+  slots = await loadSlots();
+  const startSlot = slots.find(s => s.id === selectedSlotId);
+  if (!startSlot || startSlot.status !== 'available') {
+    alert('Sorry, this slot was just taken! Please pick another.');
+    cancelBooking(); renderCalendar(); return;
+  }
+
+  const blocksNeeded = selectedBookingDuration / 30;
+  const blocksToBook = getConsecutiveSlots(startSlot, blocksNeeded);
+  if (!blocksToBook || blocksToBook.some(b => b.status !== 'available')) {
+    alert('Sorry, not enough consecutive time available. Please pick another slot or shorter duration.');
+    cancelBooking(); slots = await loadSlots(); renderCalendar(); return;
+  }
+
+  // Use a groupId to tie consecutive blocks together
+  const groupId = `g_${Date.now()}`;
+  for (const block of blocksToBook) {
+    block.status = 'booked';
+    block.bookerName = name;
+    block.bookerDuration = selectedBookingDuration;
+    block.groupId = groupId;
+    await updateSlotInDB(block);
+  }
+
+  const infoText = document.getElementById('slotInfo').textContent;
+  const durLabel = durationLabel(selectedBookingDuration);
+  document.getElementById('successText').textContent = `${name}, you're confirmed for ${infoText} (${durLabel}). See you on the mat!`;
+  document.getElementById('bookingForm').style.display = 'none';
+  document.getElementById('successMsg').classList.add('visible');
+
+  slots = await loadSlots();
+  renderCalendar();
+  if (adminLoggedIn) renderAdminSlots();
+}
+
+function cancelBooking() {
+  document.getElementById('bookingPanel').classList.remove('visible');
+  selectedSlotId = null;
+}
+
+function closeSuccess() { cancelBooking(); }
+
+// ─── ADMIN ────────────────────────────────────────────────────────────────
+function toggleAdmin(e) {
+  e.preventDefault();
+  document.getElementById('adminPanel').classList.toggle('visible');
+}
+
+async function adminSignIn() {
+  const entered = document.getElementById('adminPass').value;
+  const correct = await loadPassword();
+  if (entered === correct) {
+    adminLoggedIn = true;
+    document.getElementById('adminLogin').classList.add('hidden');
+    document.getElementById('adminControls').classList.add('visible');
+    document.getElementById('adminError').style.display = 'none';
+    document.getElementById('newSlotDate').value = formatDate(new Date());
+    renderAdminSlots();
+  } else {
+    document.getElementById('adminError').style.display = 'block';
+  }
+}
+
+function adminSignOut() {
+  adminLoggedIn = false;
+  document.getElementById('adminLogin').classList.remove('hidden');
+  document.getElementById('adminControls').classList.remove('visible');
+  document.getElementById('adminPass').value = '';
+  document.getElementById('adminPanel').classList.remove('visible');
+}
+
+async function addSlot() {
+  const date = document.getElementById('newSlotDate').value;
+  const time = document.getElementById('newSlotTime').value;
+  if (!date || !time) { alert('Pick a date and time.'); return; }
+
+  // Enforce 30-min increments
+  const [h, m] = time.split(':').map(Number);
+  if (m !== 0 && m !== 30) { alert('Please use times on the hour or half hour (e.g. 10:00 or 10:30).'); return; }
+
+  slots = await loadSlots();
+  if (slots.find(s => s.date === date && s.time === time)) {
+    alert('A slot already exists at that time.'); return;
+  }
+
+  const newSlot = { id: Date.now().toString(), date, time, durationMins: 30, status: 'available', bookerName: null, bookerDuration: null, groupId: null };
+  await addSlotToDB(newSlot);
+  slots = await loadSlots();
+  renderCalendar();
+  renderAdminSlots();
+}
+
+async function toggleBlock(id) {
+  slots = await loadSlots();
+  const s = slots.find(x => x.id === id);
+  if (!s || s.status === 'booked') return;
+  s.status = s.status === 'available' ? 'blocked' : 'available';
+  await updateSlotInDB(s);
+  slots = await loadSlots();
+  renderCalendar();
+  renderAdminSlots();
+}
+
+async function deleteSlot(id) {
+  if (!confirm('Remove this slot?')) return;
+  await deleteSlotFromDB(id);
+  slots = await loadSlots();
+  renderCalendar();
+  renderAdminSlots();
+}
+
+function generateICS(slot) {
+  const [y, m, d] = slot.date.split('-').map(Number);
+  const [h, min] = slot.time.split(':').map(Number);
+  const pad = n => String(n).padStart(2,'0');
+  const dtStart = `${y}${pad(m)}${pad(d)}T${pad(h)}${pad(min)}00`;
+  const durationMins = slot.bookerDuration || 60;
+  const totalMins = h * 60 + min + durationMins;
+  const endH = Math.floor(totalMins / 60);
+  const endMin = totalMins % 60;
+  const dtEnd = `${y}${pad(m)}${pad(d)}T${pad(endH)}${pad(endMin)}00`;
+  const now = new Date();
+  const stamp = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}T${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  const summary = slot.bookerName ? `Reformer — ${slot.bookerName}` : 'Reformer Session';
+  const description = slot.bookerName ? `Session booked by ${slot.bookerName} (${durationLabel(durationMins)}).` : 'Reformer Pilates session.';
+
+  const ics = [
+    'BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Pilates Booking//EN',
+    'CALSCALE:GREGORIAN','METHOD:PUBLISH','BEGIN:VEVENT',
+    `UID:pilates-${slot.id}@booking`,`DTSTAMP:${stamp}`,
+    `DTSTART:${dtStart}`,`DTEND:${dtEnd}`,
+    `SUMMARY:${summary}`,`DESCRIPTION:${description}`,
+    'END:VEVENT','END:VCALENDAR'
+  ].join('\r\n');
+
+  const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `reformer-${slot.date}-${slot.time.replace(':','-')}.ics`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function renderAdminSlots() {
+  const list = document.getElementById('adminSlotsList');
+  if (slots.length === 0) {
+    list.innerHTML = '<div class="empty-state">No slots yet. Add one above.</div>';
+    return;
+  }
+
+  const sorted = [...slots].sort((a,b) => (a.date+a.time).localeCompare(b.date+b.time));
+  list.innerHTML = '';
+
+  // Group booked consecutive blocks so admin sees them as one entry
+  const shownGroupIds = new Set();
+
+  sorted.forEach(s => {
+    // Skip continuation blocks of a booked group
+    if (s.status === 'booked' && s.groupId) {
+      const group = sorted.filter(x => x.groupId === s.groupId).sort((a,b) => a.time.localeCompare(b.time));
+      if (group[0].id !== s.id) return; // only show the first block
+    }
+
+    const row = document.createElement('div');
+    const clsMap = { available: 'avail', blocked: 'blkd', booked: 'bkd' };
+    row.className = `slot-row ${clsMap[s.status] || ''}`;
+
+    const label = formatDisplay(s.date, s.time);
+    let statusText = '';
+    if (s.status === 'booked') {
+      statusText = `Booked — ${s.bookerName} (${durationLabel(s.bookerDuration || 60)})`;
+    } else {
+      statusText = s.status === 'blocked' ? 'Blocked' : 'Available (30-min block)';
+    }
+
+    row.innerHTML = `
+      <div class="slot-row-info">
+        <div>${label}</div>
+        <div class="slot-row-name">${statusText}</div>
+      </div>
+      <div class="slot-row-actions">
+        ${s.status === 'booked' ? `<button class="btn-sm btn-cal" onclick="generateICS(slots.find(x=>x.id==='${s.id}'))" title="Add to calendar">📅</button>` : ''}
+        ${s.status !== 'booked' ? `<button class="btn-sm ${s.status === 'available' ? 'btn-block' : 'btn-unblock'}" onclick="toggleBlock('${s.id}')">${s.status === 'available' ? 'Block' : 'Unblock'}</button>` : ''}
+        <button class="btn-sm btn-delete" onclick="deleteSlot('${s.id}')">Remove</button>
+      </div>
+    `;
+    list.appendChild(row);
+  });
+}
+
+async function changePassword() {
+  const np = document.getElementById('newPass').value.trim();
+  if (!np) return;
+  await savePassword(np);
+  const msg = document.getElementById('passMsg');
+  msg.textContent = 'Password updated.';
+  msg.style.color = 'var(--sage-dark)';
+  msg.style.display = 'block';
+  document.getElementById('newPass').value = '';
+  setTimeout(() => { msg.style.display = 'none'; }, 2500);
+}
+
+// ─── INIT ─────────────────────────────────────────────────────────────────
+async function init() {
+  slots = await loadSlots();
+  renderCalendar();
+}
+
+init();
+
+setInterval(async () => {
+  if (!adminLoggedIn) { slots = await loadSlots(); renderCalendar(); }
+}, 20000);
+</script>
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxxdnZlanRla2NnYnp2eXF1ZmVsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEyMDk5MDcsImV4cCI6MjA5Njc4NTkwN30.CjHXUluYDXqJ8nqNWKirAq5JpOKOPRh4vV5z1ywsCsY';
 
 async function sb(path, options = {}) {
