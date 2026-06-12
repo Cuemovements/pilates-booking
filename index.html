@@ -855,7 +855,10 @@ function isToday(dateStr) { return dateStr === formatDate(new Date()); }
 function isPast(dateStr, timeStr) {
   const [y,m,dy] = dateStr.split('-').map(Number);
   const [h, min] = timeStr.split(':').map(Number);
-  return new Date(y, m-1, dy, h, min) < new Date();
+  const slotTime = new Date(y, m-1, dy, h, min);
+  const now = new Date();
+  // Only mark as past if the slot started more than 30 min ago
+  return slotTime < new Date(now.getTime() - 30 * 60 * 1000);
 }
 
 function friendlyTime(timeStr) {
