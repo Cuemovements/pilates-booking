@@ -637,7 +637,7 @@
       </div>
       <button class="btn-book" onclick="adminSignIn()">Sign in</button>
       <div id="adminError" style="color:#c0392b;font-size:12px;margin-top:8px;display:none">Wrong password. Try again.</div>
-      <p style="font-size:11px;color:var(--mid);margin-top:12px">Default password: <strong>pilates</strong> — change it below after signing in.</p>
+      <p id="defaultPassHint" style="font-size:11px;color:var(--mid);margin-top:12px">Default password: <strong>pilates</strong> — change it below after signing in.</p>
     </div>
 
     <!-- Controls -->
@@ -658,8 +658,14 @@
         <button class="btn-add-day" onclick="addFullDay()">+ Full day</button>
       </div>
 
-      <div class="admin-section-title" style="margin-top:28px">All slots</div>
-      <div class="slots-list" id="adminSlotsList"></div>
+      <div class="admin-section-title" style="margin-top:28px">📅 Upcoming bookings</div>
+      <div class="slots-list" id="adminUpcomingBooked"></div>
+
+      <div class="admin-section-title" style="margin-top:20px">🟢 Available slots</div>
+      <div class="slots-list" id="adminAvailable"></div>
+
+      <div class="admin-section-title" style="margin-top:20px">🕐 Past bookings</div>
+      <div class="slots-list" id="adminPastBooked"></div>
 
       <div style="margin-top:28px;padding-top:20px;border-top:1px solid var(--border)">
         <div class="admin-section-title">Change password</div>
@@ -1120,7 +1126,12 @@ async function adminSignIn() {
     document.getElementById('adminLogin').classList.add('hidden');
     document.getElementById('adminControls').classList.add('visible');
     document.getElementById('adminError').style.display = 'none';
+    // Hide default password hint if password has been changed
+    if (correct !== 'pilates') {
+      document.getElementById('defaultPassHint').style.display = 'none';
+    }
     document.getElementById('newSlotDate').value = formatDate(new Date());
+    document.getElementById('fullDayDate').value = formatDate(new Date());
     renderAdminSlots();
   } else {
     document.getElementById('adminError').style.display = 'block';
@@ -1208,22 +1219,39 @@ async function deleteSlot(id) {
 
 
 function renderAdminSlots() {
-  const list = document.getElementById('adminSlotsList');
-  if (slots.length === 0) {
-    list.innerHTML = '<div class="empty-state">No slots yet. Add one above.</div>';
-    return;
-  }
+  const upcomingBookedEl = document.getElementById('adminUpcomingBooked');
+  const availableEl = document.getElementById('adminAvailable');
+  const pastBookedEl = document.getElementById('adminPastBooked');
+
+  upcomingBookedEl.innerHTML = '';
+  availableEl.innerHTML = '';
+  pastBookedEl.innerHTML = '';
 
   const sorted = [...slots].sort((a,b) => (a.date+a.time).localeCompare(b.date+b.time));
-  list.innerHTML = '';
+
+  const upcomingBooked = [];
+  const available = [];
+  const pastBooked = [];
 
   sorted.forEach(s => {
-    // Skip continuation blocks of a booked group
+    // Skip continuation blocks
     if (s.status === 'booked' && s.groupId) {
       const group = sorted.filter(x => x.groupId === s.groupId).sort((a,b) => a.time.localeCompare(b.time));
       if (group[0].id !== s.id) return;
     }
 
+    const past = isPast(s.date, s.time);
+
+    if (s.status === 'booked') {
+      if (past) pastBooked.push(s);
+      else upcomingBooked.push(s);
+    } else if (s.status === 'available' && !past) {
+      available.push(s);
+    }
+    // blocked and past available slots are hidden from admin view to keep it clean
+  });
+
+  function renderRow(s, container) {
     const row = document.createElement('div');
     const clsMap = { available: 'avail', blocked: 'blkd', booked: 'bkd' };
     row.className = `slot-row ${clsMap[s.status] || ''}`;
@@ -1236,7 +1264,7 @@ function renderAdminSlots() {
       if (s.bookerEquip && s.bookerEquip !== 'No preference') extraInfo += ` · ${s.bookerEquip}`;
       if (s.bookerHealth) extraInfo += ` · ⚠️ ${s.bookerHealth}`;
     } else {
-      statusText = s.status === 'blocked' ? 'Blocked' : 'Available';
+      statusText = 'Available';
     }
 
     row.innerHTML = `
@@ -1250,8 +1278,17 @@ function renderAdminSlots() {
         <button class="btn-sm btn-delete" onclick="deleteSlot('${s.id}')">Remove</button>
       </div>
     `;
-    list.appendChild(row);
-  });
+    container.appendChild(row);
+  }
+
+  if (upcomingBooked.length === 0) upcomingBookedEl.innerHTML = '<div class="empty-state">No upcoming bookings yet.</div>';
+  else upcomingBooked.forEach(s => renderRow(s, upcomingBookedEl));
+
+  if (available.length === 0) availableEl.innerHTML = '<div class="empty-state">No available slots — add some above.</div>';
+  else available.forEach(s => renderRow(s, availableEl));
+
+  if (pastBooked.length === 0) pastBookedEl.innerHTML = '<div class="empty-state">No past bookings.</div>';
+  else pastBooked.forEach(s => renderRow(s, pastBookedEl));
 }
 
 async function changePassword() {
